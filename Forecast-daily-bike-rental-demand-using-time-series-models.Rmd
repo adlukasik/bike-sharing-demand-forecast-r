@@ -27,12 +27,29 @@ Fanaee-T, Hadi, and Gama, Joao, 'Event labeling combining ensemble detectors and
 
 ```{r}
 ## Import required packages
-
+library(ggplot2)
 
 ```
 
-
 ## Describe and explore the data
+
+### Dataset - Day
+
+* date (year-month-day)
+* season (1 - winter, 2 - spring, 3 - summer, 4 - autumn)  
+* year (0 - train year, 1 - test year)
+* month (1=january:12=december)
+* holiday (0 - non-holiday, 1 - holiday)
+* weekday (0=sunday:6=saturday)
+* working-day (0 - non-workingday, 1 - workingday)
+* daily average weather-grade (1 - good, 2 - cloudy, 3 - bad, 4 - very bad)
+* daily average of temperature, 
+* daily average of filling-temperature, 
+* daily average of humidity, 
+* daily average of wind-speed
+* daily count of casual users
+* daily count of registered users
+* daily aggregated count of rented bikes
 
 ```{r}
 
