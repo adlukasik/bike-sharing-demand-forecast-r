@@ -25,3 +25,10 @@ The analysis confirmed that bike rental demand is highly dependent on environmen
 * **Best Model:** The **SARIMAX** model (incorporating weather and trend) outperformed other models.
 * **Key Insight:** Temperature is the strongest positive driver of demand, while high humidity and windspeed act as suppressors.
 * **Challenge:** While the model accurately predicted daily fluctuations, it underestimated the record-breaking market growth in 2012, highlighting the need for dynamic trend updating in production environments.
+
+## Acknowledgements
+Data provided by [UCI Machine Learning Repository](https://archive.ics.uci.edu/dataset/275/bike+sharing+dataset).  
+
+Original paper: Fanaee-T, Hadi, and Gama, Joao, 'Event labeling combining ensemble detectors and background knowledge', Progress in Artificial Intelligence (2013).
+
+Author: Adam Łukasik
