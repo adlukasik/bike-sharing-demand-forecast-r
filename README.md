@@ -1,5 +1,7 @@
 # Bike Sharing Demand Forecasting
 
+See the [Project](https://adlukasik.github.io/bike-sharing-demand-forecast-r/index.html)
+
 ## Project Overview
 This project focuses on analyzing and forecasting daily bike rental demand using the Capital Bikeshare dataset. The goal was to identify key drivers of demand (seasonality, weather, working days) and build predictive time series models to forecast future rentals.
 
