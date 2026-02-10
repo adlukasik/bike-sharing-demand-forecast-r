@@ -1,13 +1,22 @@
 ---
-title: "Forecast daily bike rental demand using time series models"
+title: "Seasonal & Weather-Adjusted Forecasting of Bike Rentals (ARIMAX Analysis)"
 date: "`r Sys.Date()`"
 output: html_document
 author: "Adam Łukasik"
 ---
 
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = TRUE,
+	error = TRUE,
+	message = FALSE,
+	warning = FALSE,
+	fig.width = 10
+)
+```
 # About Data Analysis Report
 
-This RMarkdown file contains the report of the data analysis done for the project on forecasting daily bike rental demand using time series models in R. It contains analysis such as data exploration, summary statistics and building the time series models. The final report was completed on `r date()`. 
+This RMarkdown file contains the report of the data analysis done for the project on forecasting daily bike rental demand using time series models in R. It contains analysis such as data exploration, summary statistics and building the time series models.
 
 **Data Description:**
 
@@ -20,24 +29,33 @@ This dataset contains the daily count of rental bike transactions between years 
 Fanaee-T, Hadi, and Gama, Joao, 'Event labeling combining ensemble detectors and background knowledge', Progress in Artificial Intelligence (2013): pp. 1-15, Springer Berlin Heidelberg
 
 
+# Exploring the data
 
-# Task One: Load and explore the data
-
-## Load data and install packages
+## Loading data and installing necessary packages
 
 ```{r}
-## Import required packages
 library(ggplot2)
+library(dplyr)
+library(lubridate)
+library(timetk)
+library(corrplot)
+library(tidyr)
+library(forecast)
+library(tseries)
+library(knitr)
 
+day <- read.csv("data/day.csv")
+hour <- read.csv("data/hour.csv")
 ```
 
-## Describe and explore the data
+
+## Describing the data
 
 ### Dataset - Day
 
 * date (year-month-day)
 * season (1 - winter, 2 - spring, 3 - summer, 4 - autumn)  
-* year (0 - train year, 1 - test year)
+* year (0 - train year(2011), 1 - test year(2012))
 * month (1=january:12=december)
 * holiday (0 - non-holiday, 1 - holiday)
 * weekday (0=sunday:6=saturday)
@@ -51,51 +69,664 @@ library(ggplot2)
 * daily count of registered users
 * daily aggregated count of rented bikes
 
+### Dataset - hour
+
+* date (year-month-day)
+* season (1 - winter, 2 - spring, 3 - summer, 4 - autumn)  
+* year (0 - train year(2011), 1 - test year(2012))
+* month (1=january:12=december)
+* hour 
+* holiday (0 - non-holiday, 1 - holiday)
+* weekday (0=sunday:6=saturday)
+* working-day (0 - non-workingday, 1 - workingday)
+* weather-grade (1 - good, 2 - cloudy, 3 - bad, 4 - very bad)
+* temperature  
+* filling-temperature   
+* humidity  
+* wind-speed
+* count of casual users
+* count of registered users
+* aggregated count of rented bikes
+
+## Overview of the `day` dataset
+
 ```{r}
+str(day)
+```
+
+Adjusting viarables to proper types
+
+```{r}
+day$dteday <- as.Date(day$dteday)
+day$season <- factor(day$season, levels = c(2, 3,4,1), labels = c("Spring", "Summer", "Autumn", "Winter"))
+day$workingday <- as.factor(day$workingday)
+day$weathersit <- as.factor(day$weathersit)
+day$holiday <- as.factor(day$holiday)
+day$yr <- as.factor(day$yr)
+day$mnth <- month(day$dteday, label = TRUE)
+day$weekday <- wday(day$dteday, label = TRUE, week_start = 1)
+```
+
+## Overview of the `hour` dataset
+
+```{r}
+str(hour)
+```
+
+Adjusting viarables to proper types
+
+```{r}
+hour$dteday <- as.Date(hour$dteday)
+hour$season <- factor(hour$season, levels = c(2, 3,4,1), labels = c("Spring", "Summer", "Autumn", "Winter"))
+hour$workingday <- as.factor(hour$workingday)
+hour$weathersit <- as.factor(hour$weathersit)
+hour$hr <- as.factor(hour$hr+1)
+hour$holiday <- as.factor(hour$holiday)
+hour$yr <- as.factor(hour$yr)
+hour$mnth <- month(hour$dteday, label = TRUE)
+hour$weekday <- wday(hour$dteday, label = TRUE, week_start = 1)
 
 ```
 
+## `day` analysis
+
+### Trend for bike rentals over two years
+
+```{r fig.width=10}
+day %>%
+  ggplot(aes(dteday, cnt)) +
+  geom_line(alpha = 0.5) +
+  geom_smooth(method = "loess")+
+  labs(title = "Trend for bike rentals over two years",
+       x= "date",
+       y = "count of rented bikes")+
+  theme_minimal(base_size = 15)
+
+```
+
+Key Observations:  
+
+Seasonality: There is a clear cyclical pattern. Demand peaks significantly during the mid-year summer months, reaching over 7,000 daily rentals in 2012, while dropping below 2,000 during the winter seasons.  
+
+Growth: A year-over-year comparison shows a positive trend. The average number of rentals in 2012 was consistently higher than in 2011, indicating a growing popularity of the service.  
+
+Volatility: The daily data (grey line) shows significant fluctuations, suggesting that daily demand is sensitive to external factors such as weather or working days.  
 
 
-# Task Two: Create interactive time series plots
+### Distribution by Weekday
+
+```{r fig.width=10}
+day %>%
+  group_by(weekday) %>%
+  ggplot(aes(cnt, weekday)) +
+  geom_violin(trim = T, fill = "lightgray") +
+  geom_boxplot(width = 0.3) +
+  labs(title = "Distribution by Weekday",
+       x = "count of rented bikes") +
+  coord_flip() + 
+  theme_minimal(base_size = 15)
+```
+
+Key Observations:  
+
+Consistent Average Demand: The median number of rentals (represented by the horizontal line inside each white box) remains relatively stable throughout the week, hovering around 4,500 to 5,000 rentals per day. There is no single day that drastically outperforms the others on average.  
+
+High Variability: The vertical span of the violin shapes is very long for every day of the week, ranging from nearly 0 to over 8,000. This wide variance suggests that the day of the week is not the sole determinant of demand; other factors (likely weather or seasonality, as seen in the previous chart) play a major role.  
+
+Maximum Capacity: While the medians are similar, Saturday appears to have the highest potential ceiling, showing the longest 'tail' reaching towards the maximum recorded rentals. This suggests that the busiest peak days tend to occur on weekends.
+
+### Distribution by Month
 
 ```{r}
-## Read about the timetk package
-# ?timetk
+day %>%
+  group_by(mnth) %>%
+  ggplot(aes(cnt, mnth)) +
+  geom_violin(trim = T, fill = "gray") +
+  geom_boxplot(width = 0.2) +
+  labs(title = "Distribution by Month",
+       y = "month",
+       x = "daily count of rented bikes")+
+  coord_flip() +
+  theme_minimal(base_size = 14)
+```
+
+Key Observations:
+
+Bell-Shaped Trajectory: The data follows a clear bell-shaped curve. Demand starts low in January, climbs steadily throughout the spring, peaks in the third quarter, and declines as winter approaches.  
+
+Peak Performance (Jun–Sep): The highest activity is concentrated between June and September. During these months, the median daily rentals (indicated by the horizontal line in the box) consistently exceed 5,000. September appears to be the strongest month, showing the highest median and a distribution skewed towards the upper range.  
+
+Winter Lows: January and February represent the off-season, with median rentals dropping below 2,500. The shape of the violins in these months is 'bottom-heavy,' indicating that days with very low rental numbers are much more frequent than high-volume days.  
+
+Transition Periods: The spring (March-May) and autumn (October-November) months show significant variance (long vertical shapes), suggesting that demand in these transitional periods is highly unpredictable, likely depending on specific weather conditions.  
+
+### Influence of weather situation on number of rented bikes
+
+```{r}
+day %>%
+  group_by(weathersit) %>%
+  ggplot()+
+  geom_boxplot(aes(x = cnt, y = weathersit, fill = weathersit))+
+  labs(title = "Count of rented bikes vs Weather situation",
+       subtitle = "1 - good, 2 - cloudy, 3 - bad",
+       x = "daily count of rented bikes",
+       y = "weather situation") +
+  scale_fill_brewer(palette = "Pastel1") +
+  coord_flip() +
+  theme_minimal(base_size = 15) +
+  theme(legend.position = "none")
+```
+
+### Interaction of Temperature and Humidity
+
+```{r fig.width=10}
+day %>%
+  ggplot(aes(x = temp, y = hum)) +
+  geom_point(aes(color = cnt), size = 4, alpha = 0.8) +
+  scale_color_viridis_c(option = "magma") + 
+  labs(
+  title = "Interaction of Temperature and Humidity",
+  subtitle = "Color intensity represents number of bike rentals",
+  x = "Normalized Temperature",
+  y = "Normalized Humidity",
+  color = "Rentals") +
+  theme_minimal(base_size = 15)  
+```
+
+Key Observations:
+
+The 'Sweet Spot' for Cycling: The highest concentration of bright yellow and orange points (indicating 6,000+ rentals) is clustered in a specific region: temperatures between 0.5 and 0.8 (normalized scale) combined with moderate humidity levels of 0.4 to 0.7. This defines the optimal conditions for maximum ridership.
+
+Temperature as the Main Driver: There is a strong positive correlation between temperature and demand. The left side of the chart (cold temperatures < 0.3) is dominated by dark purple dots, indicating very low rental numbers regardless of humidity levels.
+
+The Humidity Barrier: High humidity has a dampening effect on demand, even on warmer days. Notice that in the upper-right quadrant (high temp but humidity > 0.8), the points darken to purple/black. This suggests that even if it is warm, excessive humidity (likely implying rain or mugginess) discourages users.
+
+### User Segmentation: Registered vs. Casual
+
+```{r fig.width=10}
+day %>%
+  select(dteday, casual, registered) %>%
+  pivot_longer(cols = c(casual, registered), names_to = "User Type", values_to = "Rentals") %>%
+  ggplot(aes(x = dteday, y = Rentals, colour = `User Type` )) +
+  geom_line(alpha = 0.5) +
+  geom_smooth(method = "loess")+
+  labs(
+    title = "Rentals by User Type: Registered vs. Casual",
+    y = "Number of Rentals",
+    x = "Date")+
+  scale_color_manual(
+    values = c("#E67E22", "#2C3E50"), 
+    labels = c("Casual Users", "Registered Users"),
+    name = "User Type"
+  ) +
+  theme_minimal(base_size = 15)
+```
+
+Key Observations:
+
+Dominance of Registered Users: The registered segment acts as the backbone of the service. They consistently generate significantly higher volume than casual users. The gap between the two lines widens noticeably in 2012, indicating that the overall business growth observed in previous charts is driven primarily by retaining and acquiring regular subscribers.
+
+Differing Growth Rates: While both segments show seasonal peaks in the summer, the 'Registered' category exhibits a much steeper upward trend year-over-year. In contrast, the 'Casual' segment remains relatively flat, functioning more as a seasonal bonus rather than a primary growth engine.
+
+Volatility Patterns: The raw data (jagged lines) for registered users suggests a consistent, daily usage pattern (likely commuting), whereas casual users show lower volume with smaller fluctuations, likely tied strictly to leisure and weekends.
+
+### `hour` analysis
+
+### The average hourly volume of bike rentals
+
+```{r fig.width=10}
+hour %>%
+  group_by(hr) %>%
+  summarise(mean_cnt = mean(cnt)) %>%
+  ggplot()+
+  geom_col(aes(hr, mean_cnt)) +
+  theme_minimal(base_size = 15)
+  
+```
+
+Key Observations:
+
+Bimodal Distribution: The data follows a clear 'double-peak' pattern, characteristic of commuter traffic.
+
+Rush Hours: The two highest spikes occur at 8:00 AM (morning commute) and between 17:00 and 18:00 (evening commute), indicating the service is heavily used for travel to and from work.
+
+Off-Peak Activity: Demand drops during working hours (10:00–15:00) and is minimal during the night (0:00–5:00).
+
+### Hourly Rentals: Commuting vs. Leisure
+
+```{r fig.width=10}
+hour %>%
+  group_by(hr, workingday) %>%
+  summarise(srednia = mean(cnt)) %>%
+  ggplot(aes(x = hr, y = srednia, colour = workingday, group = workingday)) +
+  geom_line(size = 1.2) +
+  labs(
+    title = "Hourly rentals by type of day",
+    y = "Average rentals",
+    x = "Hour of day"
+  ) +
+  scale_color_manual(
+    values = c("#F8766D", "#00BFC4"),
+    labels = c("Weekend", "Working Day"),
+    name = "Day Type"
+  )+
+  theme_minimal(base_size = 15)
 
 
 ```
 
+Key Observations:  
 
+The Commuter Pattern (Workdays): The blue line displays a distinct 'M-shape' with sharp peaks at 8:00 AM and 5:00 PM - 6:00 PM. This confirms that during the week, bicycles are primarily used for transportation to and from work/school.  
 
+The Leisure Pattern (Non-Workdays): The red line follows a smooth, bell-shaped curve. Demand rises gradually, peaking between 12:00 PM and 4:00 PM, which indicates recreational usage during weekends and holidays.  
 
-# Task Three: Smooth time series data
+Midday Gap: During working hours (10:00 AM – 3:00 PM), rental volume is significantly higher on weekends/holidays than on workdays.  
+
+### Hourly rentals by user category
 
 ```{r}
+hour %>%
+  group_by(hr) %>%
+  summarise(
+    mean_casual = mean(casual),
+    mean_registered = mean(registered)
+  ) %>%
+  pivot_longer(
+    cols = c(mean_casual, mean_registered), 
+    names_to = "user_type", 
+    values_to = "rentals"
+  ) %>%
+  ggplot(aes(x = hr, y = rentals, color = user_type, group = user_type)) +
+  geom_line(size = 1.2) +
+  geom_point(size = 2) +
+  scale_color_manual(
+    values = c("#E67E22", "#2C3E50"), 
+    labels = c("Casual Users", "Registered Users"),
+    name = "User Type"
+  ) +
+  labs(
+    title = "Hourly Demand by User Type",
+    subtitle = "Comparison of Registered vs. Casual behavior",
+    y = "Average Rentals",
+    x = "Hour of Day"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+           
+```
+
+Registered Users (Commuters): The dark blue line exhibits massive spikes at 8:00 AM and 5:00 PM, confirming that subscribers predominantly use the system for daily commuting. They account for the vast majority of traffic.
+
+Casual Users (Tourists): The orange line remains flat during morning hours and rises gently to a peak around 2:00 PM - 3:00 PM. This indicates non-commuter behavior, typical of tourists or spontaneous leisure trips.
+
+Volume Disparity: At peak hours, registered user activity is nearly 4x higher than casual user activity.
+
+
+# Interactive time series plot
+
+```{r fig.width=10}
+
+day %>%
+  plot_time_series(dteday, cnt, .plotly_slider = TRUE) 
 
 ```
 
+Key Capabilities:  
 
+Period Isolation: The bottom slider allows focusing on specific timeframes (e.g., comparing Summer 2011 directly with Summer 2012) to analyze growth rates in detail.  
 
-# Task Four: Decompse and access the stationarity of time series data
+Anomaly Detection: By zooming in, users can identify specific days with sudden drops in rentals, which correspond to extreme weather events or holidays mentioned in the static analysis.  
 
-```{r}
+Data Exploration: Hovering over the line reveals exact daily values, providing precise data points that are often lost in static visualizations.  
+
+# Smoothing time series data
+
+```{r fig.width=10}
+cnt_ts <- ts(day$cnt, frequency = 7)
+day$cnt_clean <- tsclean(cnt_ts)
+
+day$cnt_ma30 <- ma(day$cnt_clean, order = 30)
+day$cnt_ma7 <- ma(day$cnt_clean, order = 7)
+
+day %>%
+  ggplot(aes(x = dteday))+
+  geom_line(aes(y=cnt), color = "gray80", alpha = 0.6)+
+  geom_line(aes(y=cnt_clean), color = "#A3E4D7", alpha = 0.6, size = 0.8)+
+  geom_line(aes(y=cnt_ma30), color = "#2980B9", size = 1.2)+
+  geom_line(aes(y = cnt_ma7), color = "#E74C3C", size = 0.8)+
+  labs(
+    title = "Trend Analysis: Moving Averages",
+    subtitle = "Smoothing daily volatility to reveal seasonal patterns",
+    x = "Date",
+    y = "Number of Rentals"
+  ) +
+  theme_minimal(base_size = 15)
 
 ```
 
+Noise Reduction: The raw daily data (green line) is highly volatile. By applying a 30-day moving average (blue line), we successfully isolate the macro-trend, clearly highlighting the seasonal rise and fall without the distraction of daily fluctuations.
+
+Short-term vs. Long-term: The 7-day moving average (red line) bridges the gap. It smoothes out day-of-the-week effects but still captures short-term shifts that the monthly average might miss.
+
+Outlier Handling: The tsclean function effectively removed anomalies (visible as grey spikes in the raw data), preventing extreme outliers from distorting the trend lines."
 
 
-# Task Five: Fit and forecast time series data using ARIMA models
+# Decompsing and accessing the stationarity of time series data
+
+Decomposition:  
+1. Observed  
+2. Trend  
+3. Seasonal   
+4. Random  
+
+```{r}
+cnt_ts <- ts(day$cnt_clean, frequency = 7)
+
+dekomp <- decompose(cnt_ts, type = "additive")
+plot(dekomp)
+```
+
+An additive decomposition model was applied to break down the time series into its three constituent components.
+
+Key Observations:
+
+Trend Component: The second panel reveals the underlying structure: a combination of steady year-over-year growth and a strong annual cycle (rising in summer, falling in winter).
+
+Seasonal Component: With the frequency set to 7 (weekly), this dense panel isolates the repeating weekly pattern. The consistency of the amplitude suggests that the weekly cycle (weekdays vs. weekends) remains stable throughout the two years.
+
+Random (Residuals): The bottom panel displays the 'noise' left after extracting the trend and seasonality. The presence of spikes indicates specific days where demand was unusually high or low due to external factors (likely weather) not captured by the model.
+
+
+### ADF Test  
+
+H~0~: The time series is non-stationary  
+H~1~: The time series is stationary  
+
+```{r}
+adf.test(day$cnt_clean, alternative = "stationary")
+```
+
+ADF Test Results (Non-Stationary): The Augmented Dickey-Fuller test yielded a p-value of 0.8699. Since this is significantly higher than the significance level of 0.05, we fail to reject the null hypothesis. This confirms statistically that the time series is non-stationary and possesses a time-dependent structure (trend/seasonality) that must be addressed before modeling.
+
+### Deseasonalization
+
+```{r}
+cnt_bez_sezon <- cnt_ts - dekomp$seasonal
+
+plot(cnt_bez_sezon)
+```
+
+Deseasonalized Data: The plot displays the data after subtracting the weekly seasonal component. While the high-frequency 'jitters' (day-of-week effects) are removed, the series still exhibits a strong trend and yearly variance, confirming why the ADF test failed.
+
+### Autocorrelation Analysis
+
+```{r}
+ggAcf(day$cnt_clean) +
+  labs(
+    title = "Autocorrelation Function (ACF)",
+    y = "Autocorrelation",
+    x = "Lag (Days)"
+  ) +
+  theme_minimal(base_size = 15)
+```
+
+Key Observations:
+
+Slow Decay: The most prominent feature is the slow, linear decline of the vertical bars (lags). They remain above the blue dashed confidence intervals for an extended period. In time series analysis, this specific pattern is the signature of a non-stationary series containing a strong trend.
+
+High Persistence: The high correlation values at early lags indicate strong 'persistence' or 'memory' in the system. This means that the number of rentals today is heavily dependent on the number of rentals from yesterday, the day before, and so on.
+
+Conclusion: The lack of a rapid drop-off confirms the results of the Augmented Dickey-Fuller test. The data is not yet ready for ARIMA modeling and requires differencing to remove the trend.
+
+### PACF Analysis
+
+```{r}
+ggPacf(day$cnt_clean) +
+  labs(
+    title = "Partial Autocorrelation Function (PACF)",
+    y = "Partial Autocorrelation",
+    x = "Lag (Days)"
+  ) +
+  theme_minimal(base_size = 15)
+```
+
+### Differencing
+
+```{r}
+ndiffs(cnt_ts)
+cnt_diff <- diff(cnt_ts, differences = 1)
+plot(cnt_diff)
+```
+
+Transformation: The ndiffs function confirmed that only one level of differencing ($d=1$) was required. The resulting plot (visualizing $Y_t - Y_{t-1}$) shows a series that oscillates around a constant mean of zero, resembling white noise. The strong upward trend observed in the original data has been successfully removed.
+
+```{r}
+adf.test(cnt_diff)
+```
+
+Statistical Confirmation: The subsequent Augmented Dickey-Fuller (ADF) test yielded a p-value of 0.01. Since this is well below the 0.05 significance threshold, we reject the null hypothesis.
+
+Conclusion: The data is now statistically stationary. This transformation satisfies the prerequisites for ARIMA modeling, allowing us to proceed with forecasting algorithms.
+
+# Fitting and forecasting time series data using ARIMA models
+
+### Auto SARIMAX + Weather + Trend (Global)
+
+```{r}
+xreg_all <- day %>%
+  select(temp, hum, windspeed, weathersit, instant) %>%
+  mutate(weathersit = as.numeric(weathersit)) %>%
+  as.matrix()
+
+cnt_ts_all <- ts(day$cnt, frequency = 7)
+
+final_model <- auto.arima(
+  cnt_ts_all,
+  xreg = xreg_all,
+  seasonal = TRUE,
+  stepwise = FALSE,
+  approximation = FALSE
+)
+
+summary(final_model)
+```
+
+Model Structure (ARIMA 1,0,3): The algorithm selected an ARIMA(1,0,3) structure. Interestingly, the integration order is zero ($d=0$). This is likely because the global trend is explicitly handled by the instant variable in the regressors, removing the need for differencing within the ARIMA terms.
+
+Impact of Weather (Exogenous Variables): The coefficients reveal strong correlations:
+
+* Temperature (temp: 5156.5): This is the strongest driver. A unit increase in normalized temperature correlates with a massive surge in rentals.
+
+* Adverse Weather: Windspeed (-2848.2), Humidity (-2045.2), and Weather Situation (-495.4) all have negative coefficients, confirming that poor conditions significantly suppress demand.
+
+Organic Growth (instant): The instant variable has a positive coefficient (+4.39). This represents the 'underlying growth' of the business—every passing day adds a small increment to the demand, independent of weather or season.
+
+Model Fit: The model achieved an RMSE (Root Mean Squared Error) of 734.90. Considering the daily volume ranges from 0 to 8000, this indicates a reasonably strong fit for a model covering the full two-year period.
+
+```{r}
+future_trend <- (nrow(day)+1):(nrow(day)+25)
+
+future_weather <- day %>%
+  summarise(
+    temp = mean(temp),
+    hum = mean(hum),
+    windspeed = mean(windspeed),
+    weathersit = mean(as.numeric(weathersit))
+  )
+
+future_xreg <- cbind(
+  temp = rep(future_weather$temp, 25),
+  hum = rep(future_weather$hum, 25),
+  windspeed = rep(future_weather$windspeed, 25),
+  weathersit = rep(future_weather$weathersit, 25),
+  trend = future_trend
+)
+
+final_fc <- forecast(
+  final_model,
+  xreg = future_xreg,
+  h = 25
+)
+
+autoplot(final_fc) +
+  labs(
+    title = "25-Day Forecast",
+    subtitle = "SARIMAX with Weather and Trend",
+    y = "Bike Rentals",
+    x = "Date"
+  ) +
+  theme_minimal(base_size = 15)
+```
+
+Sensible Trajectory: The forecast (blue line) starts around 4,500–5,000 rentals and shows a gentle upward trend. Considering the data ends in December (winter), predicting a slow rise as we move towards Spring is logically sound. It doesn't show unrealistic spikes to 8,000 (summer levels) nor crashes to 0.
+
+Uncertainty Handling: The widening blue cones (confidence intervals) correctly reflect that the further into the future we look, the less certain we are. The wide range (light blue area) covers values from ~3,000 to ~7,000, which accounts for the unpredictability of weather.
+
+Lack of Volatility: Notice that the forecast line is much smoother than the black historical line. This is normal. The model likely uses "average" weather for the future (or a smooth trend), so it cannot predict specific rainy days that cause those sharp drops in the historical data. It predicts the expected average, not the daily chaos.
+
+### Models for Train/Test datasets
+
+```{r}
+train <- day %>% filter(yr == 0)
+test  <- day %>% filter(yr == 1)
+
+train_ts <- ts(train$cnt, frequency = 7, start = c(2011,1))
+test_ts  <- ts(test$cnt, frequency = 7, start = c(2012,1))
+```
+
+#### Naive
+
+```{r}
+naive_fc <- naive(train_ts, h = length(test_ts))
+
+accuracy(naive_fc, test_ts)
+```
+
+Logic: Assumes that future values will simply equal the last observed value from 2011.
+
+Performance: Unsurprisingly, this model failed to capture the complexity of the data, resulting in a high RMSE of 1180.40 on the test set. Since the 'last value' of 2011 was likely a low winter number, the model projected a flat line, completely missing the summer peak of 2012.
+
+#### Auto ARIMA
+
+```{r}
+model_train <- auto.arima(train_ts)
+
+fc <- forecast(model_train, h = length(test_ts))
+
+accuracy(fc, test_ts)
+```
+
+Logic: Learned seasonality and trends solely from 2011 data to forecast the entirety of 2012.
+
+Performance: The ARIMA model showed a slight improvement over the baseline, achieving a Test RMSE of 1146.89. While better, the error remains high. This suggests that training on just one year of history (2011) is insufficient for the algorithm to fully grasp the strong year-over-year growth trend visible in 2012. The model likely predicted the seasonal shape correctly but underestimated the magnitude (volume) of rentals.
+
+#### Auto SARIMAX + Weather + Trend
+
+```{r}
+train$trend <- 1:nrow(train)
+
+test$trend <- (nrow(train) + 1):(nrow(train) + nrow(test))
+
+xreg_train_trend <- train %>%
+  select(temp, hum, windspeed, weathersit, trend) %>%
+  mutate(weathersit = as.numeric(weathersit)) %>%
+  as.matrix()
+
+xreg_test_trend <- test %>%
+  select(temp, hum, windspeed, weathersit, trend) %>%
+  mutate(weathersit = as.numeric(weathersit)) %>%
+  as.matrix()
+
+model_arimax_trend <- auto.arima(
+  train_ts,
+  xreg = xreg_train_trend,
+  seasonal = TRUE,
+  stepwise = FALSE,
+  approximation = FALSE
+)
+
+summary(model_arimax_trend)
+```
+
+Significant Performance Boost: The addition of weather and trend variables reduced the Training RMSE to 564.89. Compared to the simple Univariate ARIMA (RMSE ~717), this represents a ~21% reduction in error. The model fits the data much more precisely because it 'understands' why rentals drop (bad weather) rather than just reacting to previous values.
+
+Confirmed Drivers: The coefficients align perfectly with business intuition:
+
+* Temperature (3316.85): Remains the strongest positive driver.
+
+* Windspeed (-2242.74) & Humidity (-1442.47): Act as strong suppressors of demand.
+
+Explicit Growth Modeling: The manual trend variable has a positive coefficient (2.97). This tells us that, holding weather constant, the business organically gains about 3 extra rentals every single day. This linear component is crucial for predicting the record-breaking heights of 2012, which the previous models failed to capture.
+
+```{r}
+fc_arimax_trend <- forecast(
+  model_arimax_trend,
+  xreg = xreg_test_trend,
+  h = length(test_ts)
+)
+
+accuracy(fc_arimax_trend, test_ts)
+```
+
+Training Mastery (2011): The inclusion of weather and trend regressors resulted in a highly accurate model on the training data, achieving an RMSE of 564.89. This confirms that temperature and linear growth are the primary drivers of demand.
+
+Test Reality Check (2012): When applied to unseen data, the error doubled (RMSE 1139.84). This indicates that while the model correctly predicts daily fluctuations based on weather (the "shape"), it underestimates the accelerating magnitude of market growth in 2012 (the "volume"). The linear trend learned from 2011 was too conservative for the record-breaking demand of the following year.
+
+```{r fig.width=10}
+starting_date <- start(fc_arimax_trend$mean)
+
+test_ts_fixed <- ts(test$cnt, frequency = 7, start = starting_date,)
+
+autoplot(fc_arimax_trend, size = 1.2) +
+  autolayer(test_ts_fixed, size = 0.8, alpha = 0.8) +
+  labs(
+    title = "SARIMAX with Weather and Trend",
+    subtitle = "Forecast (Blue) vs Actual (Red)",
+    y = "Bike Rentals",
+    x = "Date"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+
+Behavioral Fit (The "Shape"): The model demonstrates excellent sensitivity to high-frequency changes. Notice how the blue line dips and spikes in almost perfect synchronization with the red line. This confirms that the weather regressors are correctly identifying days with poor conditions (rain/cold).
+
+Systematic Bias (The "Gap"): Despite capturing the daily patterns, the forecast systematically undershoots the actual volume during the peak summer months. The blue band sits consistently lower than the red spikes. This indicates that the linear trend component learned from 2011 data was too conservative to fully capture the explosive business growth in 2012.
 
 ```{r}
 
+acc_naive   <- accuracy(naive_fc, test_ts)["Test set", c("RMSE", "MAE", "MAPE")]
+acc_arima   <- accuracy(fc, test_ts)["Test set", c("RMSE", "MAE", "MAPE")]
+acc_sarimax <- accuracy(fc_arimax_trend, test_ts)["Test set", c("RMSE", "MAE", "MAPE")]
+
+model_comparison <- data.frame(
+  Model = c("Naive Method (Baseline)", 
+            "Auto ARIMA (Only History)", 
+            "SARIMAX (Weather + Trend)"),
+  RMSE = c(acc_naive["RMSE"], acc_arima["RMSE"], acc_sarimax["RMSE"]),
+  MAE  = c(acc_naive["MAE"], acc_arima["MAE"], acc_sarimax["MAE"]),
+  MAPE = c(acc_naive["MAPE"], acc_arima["MAPE"], acc_sarimax["MAPE"])
+)
+
+kable(model_comparison, 
+      digits = 2, 
+      caption = "Model Performance Evaluation on Test Data (2012)")
+
 ```
 
+Naive Method (Baseline): As expected, this performed worst (RMSE 1180.40). It served its purpose as a baseline to beat.
+
+Auto ARIMA (History Only): Achieved a moderate improvement (RMSE 1146.89), proving that accounting for seasonality is better than assuming a flat line.
+
+SARIMAX (Weather + Trend): Emerged as the best performing model with the lowest RMSE (1139.84) and, notably, the lowest MAPE (105.29).  
+
+* While the reduction in RMSE compared to Auto ARIMA seems small (~7 points), the MAPE (Mean Absolute Percentage Error) shows a more distinct improvement (dropping from 115% to 105%). This confirms that adding external variables (weather) provides a tangible accuracy gain, even if the unpredicted trend growth keeps the overall error high.
 
 
-# Task Six: Findings and Conclusions
+# Findings and Conclusions
 
-
+The comparative analysis confirms that the SARIMAX model is the superior approach. It not only achieves the lowest statistical error but, more importantly, it realistically reproduces the daily volatility caused by weather conditions. The remaining error is primarily due to the 2012 growth surge exceeding the historical trend. For future deployment, the model would benefit from dynamic retraining (e.g., updating the trend coefficient every month) to adjust to the changing market scale.
 
 
 
